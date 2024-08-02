@@ -13,22 +13,35 @@ def optimize_llm(connection: Unify, config: dict, input_text: Union[str, Sequenc
     :param connection: CustomConnection to use
     :param config: requirements for the optimization
     """
-    quality = config.get("quality", "1")
-    cost = config.get("cost", "4.65e-03")
-    time_to_first_token = config.get("time_to_first_token", "2.08e-05")
-    inter_token_latency = config.get("inter_token_latency", "2.07e-03")
+    quality: str = config.get("quality", "1")
+    cost: str = config.get("cost", "4.65e-03")
+    time_to_first_token: str = config.get("time_to_first_token", "2.08e-05")
+    inter_token_latency: str = config.get("inter_token_latency", "2.07e-03")
+    endpoint: Union[list[str], str] = config.get("endpoint", None)
+    model: Union[list[str], str] = config.get("model", None)
+    provider: Union[list[str], str] = config.get("provider", None)
+
     router = f"router@q:{quality}|c:{cost}|t:{time_to_first_token}|i:{inter_token_latency}"
-    endpoint = config.get("endpoint", None)
-    model = config.get("model", None)
-    provider = config.get("provider", None)
+
     if isinstance(endpoint, list):
-        ...
+        model = []
+        provider = []
+        for entry in endpoint:
+            entry_model, entry_provider = tuple(entry.split("@"))
+            model.append(entry_model)
+            provider.append(entry_provider)
+    if isinstance(provider, list):
+        providers = ",".join(provider)
+        router_listed = router.split("@")
+        router_listed.insert(1, f"@provider:{providers}|")
+        router = "".join(router_listed)
     if isinstance(model, list):
         models = ",".join(model)
-        router_listed = router.split("@").insert(1, f"@model:{models}|")
+        router_listed = router.split("@")
+        router_listed.insert(1, f"@model:{models}|")
         router = "".join(router_listed)
-    if isinstance(provider, list):
-        ...
+        connection.set_endpoint(router)
+        return None
 
     if endpoint:
         connection.set_endpoint(endpoint)
@@ -36,4 +49,4 @@ def optimize_llm(connection: Unify, config: dict, input_text: Union[str, Sequenc
         connection.set_model(model)
         connection.set_provider(provider)
 
-    return "Hello " + input_text
+    return None
