@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from unify import Unify
 
 from promptflow.connections import CustomConnection
-from unify_integration.unify_llm_tool.tools.evaluate_llm_tool import evaluate_llms
+from unify_integration.unify_llm_tool.tools.evaluate_llm_tool import benchmark_models
 from unify_integration.unify_llm_tool.tools.optimize_llm_tool import optimize_llm
 
 load_dotenv()
@@ -28,7 +28,7 @@ class TestTool:
     def test_evaluate_llms(self, my_custom_connection):
         models = []
         prompt_set = []
-        result = evaluate_llms(my_custom_connection, models=models, prompt_set=prompt_set)
+        result = benchmark_models(models=models, prompt_set=prompt_set)
         assert isinstance(result, dict)
 
 
