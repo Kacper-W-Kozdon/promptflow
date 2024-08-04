@@ -2,9 +2,6 @@ unify_integration.tools.unify_llm_tool.evaluate_llm_tool:
   name: Unify Tool
   type: python
   inputs:
-    connection:
-      type:
-        - Unify
     models:
       type:
         - list

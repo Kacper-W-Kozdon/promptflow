@@ -15,6 +15,7 @@ def optimize_llm(connection: Unify, config: Optional[dict], input_text: Union[st
     :param config: requirements for the optimization
     :param input_text:
     """
+    assert isinstance(connection.get_credit_balance(), (str, float, int))
     if not isinstance(config, dict):
         config = {}
     quality: str = config.get("quality", "1")
