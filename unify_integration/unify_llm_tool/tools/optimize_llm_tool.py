@@ -26,7 +26,7 @@ def optimize_llm(connection: Unify, config: Optional[dict], input_text: Union[st
     model: Union[list[str], str] = config.get("model", None)
     provider: Union[list[str], str] = config.get("provider", None)
 
-    router = f"router@q:{quality}|c:{cost}|t:{time_to_first_token}|i:{inter_token_latency}"
+    router: str = f"router@q:{quality}|c:{cost}|t:{time_to_first_token}|i:{inter_token_latency}"
 
     if isinstance(endpoint, list):
         model = []
@@ -36,18 +36,18 @@ def optimize_llm(connection: Unify, config: Optional[dict], input_text: Union[st
             model.append(entry_model)
             provider.append(entry_provider)
     if isinstance(provider, list):
-        providers = ",".join(provider)
-        router_listed = router.split("@")
+        providers: str = ",".join(provider)
+        router_listed: list = router.split("@")
         router_listed.insert(1, f"@provider:{providers}|")
         router = "".join(router_listed)
     if isinstance(model, list):
-        models = ",".join(model)
-        router_listed = router.split("@")
+        models: str = ",".join(model)
+        router_listed: list = router.split("@")
         router_listed.insert(1, f"@model:{models}|")
         router = "".join(router_listed)
         connection.set_endpoint(router)
         response: str = connection.generate(input_text)
-        endpoint = connection.endpoint
+        endpoint: str = connection.endpoint
         return {"optimal_endpoint": endpoint, "response": response}
 
     if endpoint:
@@ -56,6 +56,6 @@ def optimize_llm(connection: Unify, config: Optional[dict], input_text: Union[st
         connection.set_model(model)
         connection.set_provider(provider)
 
-    response = connection.generate(input_text)
-    endpoint = connection.endpoint
+    response: str = connection.generate(input_text)
+    endpoint: str = connection.endpoint
     return {"optimal_endpoint": endpoint, "response": response}
