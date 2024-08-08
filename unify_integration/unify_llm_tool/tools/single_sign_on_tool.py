@@ -1,22 +1,58 @@
 from typing import Dict, Optional
 
+import unify.clients
+from unify import Unify
+
 from promptflow._constants import ConnectionType
 from promptflow.connections import CustomConnection
 from promptflow.core import tool
+
+
+class UnifyClient(Unify):
+    """Unify client.
+
+    :param configs: The configs kv pairs.
+    :type configs: Dict[str, str]
+    :param secrets: The secrets kv pairs.
+    :type secrets: Dict[str, str]
+    :param name: Connection name
+    :type nam
+    """
+
+    def __init__(self, configs: dict = None, secrets: dict = None, **kwargs: dict):
+        api_key = secrets.get("api_key") or kwargs.get("api_key") or configs.get("api_key")
+        endpoint = secrets.get("endpoint") or kwargs.get("endpoint") or configs.get("endpoint")
+        model = secrets.get("model") or kwargs.get("model") or configs.get("model")
+        provider = secrets.get("provider") or kwargs.get("provider") or configs.get("provider")
+        super().__init__(endpoint=endpoint, model=model, provider=provider, api_key=api_key)
+
+
+unify.clients.Unify = UnifyClient
+
 
 # Unify client as the connection is a temporary solution before the final approach is chosen (CustomConnection?)
 
 
 class UnifyConnection(CustomConnection):
+    """Unify connection.
+
+    :param configs: The configs kv pairs.
+    :type configs: Dict[str, str]
+    :param secrets: The secrets kv pairs.
+    :type secrets: Dict[str, str]
+    :param name: Connection name
+    :type name: str
+    """
+
     TYPE = ConnectionType.CUSTOM.value
 
     def __init__(
         self,
         secrets: Dict[str, str],
-        configs: Dict[str, str] = None,
-        **kwargs,
+        configs: Optional[Dict[str, str]],
+        **kwargs: dict,
     ):
-        _Connection_kwargs: Dict[str, str] = {
+        _Connection_kwargs: dict = {
             "name": "UnifyConnection",
             "module": "unify.clients",
             "type": "Custom",
@@ -27,4 +63,13 @@ class UnifyConnection(CustomConnection):
 
 @tool
 def single_sign_on(config: Optional[dict], secrets: Optional[dict]) -> UnifyConnection:
-    ...
+    """Unify connection tool.
+
+    :param configs: The configs kv pairs.
+    :type configs: Dict[str, str]
+    :param secrets: The secrets kv pairs.
+    :type secrets: Dict[str, str]
+    :param name: Connection name
+    :type name: str
+    """
+    return None
