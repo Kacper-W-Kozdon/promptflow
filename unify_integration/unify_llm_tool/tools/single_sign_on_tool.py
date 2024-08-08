@@ -45,6 +45,11 @@ class UnifyConnection(CustomConnection):
     """
 
     TYPE = ConnectionType.CUSTOM.value
+    _Connection_kwargs: dict = {
+        "name": "UnifyConnection",
+        "module": "unify.clients",
+        "type": "Custom",
+    }
 
     def __init__(
         self,
@@ -52,13 +57,19 @@ class UnifyConnection(CustomConnection):
         configs: Optional[Dict[str, str]],
         **kwargs: dict,
     ):
-        _Connection_kwargs: dict = {
-            "name": "UnifyConnection",
-            "module": "unify.clients",
-            "type": "Custom",
-        }
-        kwargs = {**kwargs, **_Connection_kwargs}
+
+        kwargs = {**kwargs, **self._Connection_kwargs}
         super().__init__(secrets=secrets, configs=configs, **kwargs)
+
+    def connect(self) -> Unify:
+        """
+        Creates an instance of Unify client.
+
+        """
+
+        module = self._Connection_kwargs.get("module")
+        name = self._Connection_kwargs.get("name")
+        return self._convert_to_custom_strong_type(module=module, to_class=name)
 
 
 @tool
@@ -73,6 +84,6 @@ def single_sign_on(configs: Optional[Dict[str, str]], secrets: Dict[str, str]) -
     :type name: str
     """
     connection = UnifyConnection(secrets=secrets, configs=configs)
-    connection_instance = connection._convert_to_custom_strong_type(module=connection.module, to_class=connection.name)
+    connection_instance = connection.connect()
 
     return connection_instance
