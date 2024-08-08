@@ -62,7 +62,7 @@ class UnifyConnection(CustomConnection):
 
 
 @tool
-def single_sign_on(config: Optional[dict], secrets: Optional[dict]) -> UnifyConnection:
+def single_sign_on(configs: Optional[Dict[str, str]], secrets: Dict[str, str]) -> UnifyConnection:
     """Unify connection tool.
 
     :param configs: The configs kv pairs.
@@ -72,4 +72,7 @@ def single_sign_on(config: Optional[dict], secrets: Optional[dict]) -> UnifyConn
     :param name: Connection name
     :type name: str
     """
-    return None
+    connection = UnifyConnection(secrets=secrets, configs=configs)
+    connection_instance = connection._convert_to_custom_strong_type(module=connection.module, to_class=connection.name)
+
+    return connection_instance
