@@ -1,6 +1,4 @@
 unify_llm_tool.tools.optimize_llm_tool:
-  name: Unify Tool
-  type: python
   function: optimize_llm
   inputs:
     connection:
@@ -12,5 +10,7 @@ unify_llm_tool.tools.optimize_llm_tool:
     input_text:
       type:
         - str
-  description: Tool for routing and LLM optimization
   module: unify_llm_tool.tools.optimize_llm_tool
+  name: Unify Tool
+  description: Tool for routing and LLM optimization
+  type: python

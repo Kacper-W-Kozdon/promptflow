@@ -1,6 +1,4 @@
 unify_llm_tool.tools.evaluate_llm_tool:
-  name: Unify Tool
-  type: python
   function: benchmark_models
   inputs:
     models:
@@ -9,5 +7,7 @@ unify_llm_tool.tools.evaluate_llm_tool:
     prompt_set:
       type:
         - list
-  description: Tool for benchmarking
   module: unify_llm_tool.tools.evaluate_llm_tool
+  name: Unify Tool
+  description: Tool for benchmarking
+  type: python
