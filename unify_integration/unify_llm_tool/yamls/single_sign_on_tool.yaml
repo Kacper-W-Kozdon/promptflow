@@ -1,6 +1,7 @@
 unify_llm_tool.tools.single_sign_on_tool:
   name: Unify Tool
   type: python
+  function: single_sign_on
   inputs:
     config:
       type:
@@ -10,4 +11,3 @@ unify_llm_tool.tools.single_sign_on_tool:
         - dict
   description: Tool for single sign on to multiple endpoints
   module: unify_llm_tool.tools.single_sign_on_tool
-  function: single_sign_on
