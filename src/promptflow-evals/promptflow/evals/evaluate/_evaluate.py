@@ -2,31 +2,49 @@
 # Copyright (c) Microsoft Corporation. All rights reserved.
 # ---------------------------------------------------------
 import inspect
+import os
 import re
-from typing import Any, Callable, Dict, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
 import numpy as np
 import pandas as pd
 
 from promptflow._sdk._constants import LINE_NUMBER
 from promptflow.client import PFClient
-from ._telemetry import log_evaluate_activity
 
-from .._constants import CONTENT_SAFETY_DEFECT_RATE_THRESHOLD_DEFAULT, EvaluationMetrics, Prefixes
+from .._constants import (
+    CONTENT_SAFETY_DEFECT_RATE_THRESHOLD_DEFAULT,
+    EvaluationMetrics,
+    Prefixes,
+    _InternalEvaluationMetrics,
+)
 from .._user_agent import USER_AGENT
 from ._batch_run_client import BatchRunContext, CodeClient, ProxyClient
+from ._telemetry import log_evaluate_activity
 from ._utils import (
     _apply_column_mapping,
     _log_metrics_and_instance_results,
-    _write_output,
     _trace_destination_from_project_scope,
+    _write_output,
 )
 
 
-def _aggregate_metrics(df, evaluators) -> Dict[str, float]:
-    df.rename(columns={col: col.replace("outputs.", "") for col in df.columns}, inplace=True)
+# pylint: disable=line-too-long
+def _aggregate_content_safety_metrics(
+    df: pd.DataFrame, evaluators: Dict[str, Type]
+) -> Tuple[List[str], Dict[str, float]]:
+    """Find and aggregate defect rates for content safety metrics. Returns both a list
+    of columns that were used to calculate defect rates and the defect rates themselves.
 
-    # Calculate defect rates for content safety metrics
+    :param df: The dataframe of evaluation results.
+    :type df: ~pandas.DataFrame
+    :param evaluators:  A dictionary mapping of strings to evaluator classes. This is used to identify
+        content safety metrics, since they should start with a string that matches an evaluator name.
+    :type evaluators: Dict[str, type]
+    :return: A tuple; the first element is a list of dataframe columns that were used to calculate defect rates,
+        and the second element is a dictionary of defect column names and defect rates.
+    :rtype: Tuple[List[str], Dict[str, float]]
+    """
     content_safety_metrics = [
         EvaluationMetrics.SEXUAL,
         EvaluationMetrics.SELF_HARM,
@@ -58,12 +76,75 @@ def _aggregate_metrics(df, evaluators) -> Dict[str, float]:
             / col_with_numeric_values.count(),
             2,
         )
+    return content_safety_cols, defect_rates
+
+
+def _aggregate_label_defect_metrics(df: pd.DataFrame) -> Tuple[List[str], Dict[str, float]]:
+    """Find and aggregate defect rates for label-based metrics. Returns both a list
+    of columns that were used to calculate defect rates and the defect rates themselves.
+
+    :param df: The dataframe of evaluation results.
+    :type df: ~pandas.DataFrame
+    :return: A tuple; the first element is a list of dataframe columns that were used to calculate defect rates,
+        and the second element is a dictionary of defect column names and defect rates.
+    :rtype: Tuple[List[str], Dict[str, float]]
+    """
+    handled_metrics = [
+        EvaluationMetrics.PROTECTED_MATERIAL,
+        _InternalEvaluationMetrics.ECI,
+        EvaluationMetrics.XPIA,
+    ]
+    label_cols = []
+    for col in df.columns:
+        metric_name = col.split(".")[1]
+        if metric_name.endswith("_label") and metric_name.replace("_label", "").lower() in handled_metrics:
+            label_cols.append(col)
+
+    label_df = df[label_cols]
+    defect_rates = {}
+    for col in label_df.columns:
+        defect_rate_name = col.replace("_label", "_defect_rate")
+        col_with_boolean_values = pd.to_numeric(label_df[col], errors="coerce")
+        defect_rates[defect_rate_name] = round(
+            np.sum(col_with_boolean_values) / col_with_boolean_values.count(),
+            2,
+        )
+    return label_cols, defect_rates
+
+
+def _aggregate_metrics(df: pd.DataFrame, evaluators: Dict[str, Type]) -> Dict[str, float]:
+    """Aggregate metrics from the evaluation results.
+    On top of naively calculating the mean of most metrics, this function also identifies certain columns
+    that represent defect rates and renames them accordingly. Other columns in the dataframe are dropped.
+    EX: protected_material_label -> protected_material_defect_rate
+
+    :param df: The dataframe of evaluation results.
+    :type df: ~pandas.DataFrame
+    :param evaluators:  A dictionary mapping of strings to evaluator classes.
+    :type evaluators: Dict[str, Type]
+    :return: The aggregated metrics.
+    :rtype: Dict[str, float]
+    """
+    df.rename(columns={col: col.replace("outputs.", "") for col in df.columns}, inplace=True)
+
+    handled_columns = []
+    defect_rates = {}
+    # Rename certain columns as defect rates if we know that's what their aggregates represent
+    # Content safety metrics
+    content_safety_cols, cs_defect_rates = _aggregate_content_safety_metrics(df, evaluators)
+    handled_columns.extend(content_safety_cols)
+    defect_rates.update(cs_defect_rates)
+    # Label-based (true/false) metrics where 'true' means 'something is wrong'
+    label_cols, label_defect_rates = _aggregate_label_defect_metrics(df)
+    handled_columns.extend(label_cols)
+    defect_rates.update(label_defect_rates)
 
     # For rest of metrics, we will calculate mean
-    df.drop(columns=content_safety_cols, inplace=True)
+    df.drop(columns=handled_columns, inplace=True)
+
     mean_value = df.mean(numeric_only=True)
     metrics = mean_value.to_dict()
-
+    # Add defect rates back into metrics
     metrics.update(defect_rates)
     return metrics
 
@@ -79,8 +160,7 @@ def _validate_input_data_for_evaluator(evaluator, evaluator_name, df_data, is_ta
     if missing_inputs:
         if not is_target_fn:
             raise ValueError(f"Missing required inputs for evaluator {evaluator_name} : {missing_inputs}.")
-        else:
-            raise ValueError(f"Missing required inputs for target : {missing_inputs}.")
+        raise ValueError(f"Missing required inputs for target : {missing_inputs}.")
 
 
 def _validate_and_load_data(target, data, evaluators, output_path, azure_ai_project, evaluation_name):
@@ -114,7 +194,9 @@ def _validate_and_load_data(target, data, evaluators, output_path, azure_ai_proj
     try:
         initial_data_df = pd.read_json(data, lines=True)
     except Exception as e:
-        raise ValueError(f"Failed to load data from {data}. Please validate it is a valid jsonl data. Error: {str(e)}.")
+        raise ValueError(
+            f"Failed to load data from {data}. Please validate it is a valid jsonl data. Error: {str(e)}."
+        ) from e
 
     return initial_data_df
 
@@ -128,16 +210,19 @@ def _validate_columns(
     """
     Check that all columns needed by evaluator or target function are present.
 
-    :keyword df: The data frame to be validated.
-    :paramtype df: pd.DataFrame
-    :keyword evaluators: The dictionary of evaluators.
-    :paramtype evaluators: Dict[str, Any]
-    :keyword target: The callable to be applied to data set.
-    :paramtype target: Optional[Callable]
+    :param df: The data frame to be validated.
+    :type df: pd.DataFrame
+    :param evaluators: The dictionary of evaluators.
+    :type evaluators: Dict[str, Any]
+    :param target: The callable to be applied to data set.
+    :type target: Optional[Callable]
+    :param evaluator_config: The configuration for evaluators.
+    :type evaluator_config: Dict[str, Dict[str, str]]
+    :raises ValueError: If column starts from "__outputs." while target is defined.
     """
     if target:
-        if any(c.startswith(Prefixes._TGT_OUTPUTS) for c in df.columns):
-            raise ValueError("The column cannot start from " f'"{Prefixes._TGT_OUTPUTS}" if target was defined.')
+        if any(c.startswith(Prefixes.TSG_OUTPUTS) for c in df.columns):
+            raise ValueError("The column cannot start from " f'"{Prefixes.TSG_OUTPUTS}" if target was defined.')
         # If the target function is given, it may return
         # several columns and hence we cannot check the availability of columns
         # without knowing target function semantics.
@@ -164,18 +249,20 @@ def _apply_target_to_data(
     """
     Apply the target function to the data set and return updated data and generated columns.
 
-    :keyword target: The function to be applied to data.
-    :paramtype target: Callable
-    :keyword data: The path to input jsonl file.
-    :paramtype data: str
-    :keyword pf_client: The promptflow client to be used.
-    :paramtype pf_client: PFClient
-    :keyword initial_data: The data frame with the loaded data.
-    :paramtype initial_data: pd.DataFrame
-    :keyword _run_name: The name of target run. Used for testing only.
-    :paramtype _run_name: Optional[str]
+    :param target: The function to be applied to data.
+    :type target: Callable
+    :param data: The path to input jsonl file.
+    :type data: str
+    :param pf_client: The promptflow client to be used.
+    :type pf_client: PFClient
+    :param initial_data: The data frame with the loaded data.
+    :type initial_data: pd.DataFrame
+    :param evaluation_name: The name of the evaluation.
+    :type evaluation_name: Optional[str]
+    :param _run_name: The name of target run. Used for testing only.
+    :type _run_name: Optional[str]
     :return: The tuple, containing data frame and the list of added columns.
-    :rtype: Tuple[pd.DataFrame, List[str]]
+    :rtype: Tuple[pandas.DataFrame, List[str]]
     """
     # We are manually creating the temporary directory for the flow
     # because the way tempdir remove temporary directories will
@@ -191,7 +278,7 @@ def _apply_target_to_data(
     target_output = pf_client.runs.get_details(run, all_results=True)
     # Remove input and output prefix
     generated_columns = {
-        col[len(Prefixes._OUTPUTS) :] for col in target_output.columns if col.startswith(Prefixes._OUTPUTS)
+        col[len(Prefixes.OUTPUTS) :] for col in target_output.columns if col.startswith(Prefixes.OUTPUTS)
     }
     # Sort output by line numbers
     target_output.set_index(f"inputs.{LINE_NUMBER}", inplace=True)
@@ -202,15 +289,22 @@ def _apply_target_to_data(
     drop_columns = list(filter(lambda x: x.startswith("inputs"), target_output.columns))
     target_output.drop(drop_columns, inplace=True, axis=1)
     # Rename outputs columns to __outputs
-    rename_dict = {col: col.replace(Prefixes._OUTPUTS, Prefixes._TGT_OUTPUTS) for col in target_output.columns}
+    rename_dict = {col: col.replace(Prefixes.OUTPUTS, Prefixes.TSG_OUTPUTS) for col in target_output.columns}
     target_output.rename(columns=rename_dict, inplace=True)
     # Concatenate output to input
     target_output = pd.concat([target_output, initial_data], axis=1)
+
     return target_output, generated_columns, run
 
 
-def _process_evaluator_config(evaluator_config: Dict[str, Dict[str, str]]):
-    """Process evaluator_config to replace ${target.} with ${data.}"""
+def _process_evaluator_config(evaluator_config: Dict[str, Dict[str, str]]) -> Dict[str, Dict[str, str]]:
+    """Process evaluator_config to replace ${target.} with ${data.}
+
+    :param evaluator_config: The configuration for evaluators.
+    :type evaluator_config: Dict[str, Dict[str, str]]
+    :return: The processed configuration.
+    :rtype: Dict[str, Dict[str, str]]
+    """
 
     processed_config = {}
 
@@ -222,7 +316,6 @@ def _process_evaluator_config(evaluator_config: Dict[str, Dict[str, str]]):
                 processed_config[evaluator] = {}
 
                 for map_to_key, map_value in mapping_config.items():
-
                     # Check if there's any unexpected reference other than ${target.} or ${data.}
                     if unexpected_references.search(map_value):
                         raise ValueError(
@@ -236,21 +329,24 @@ def _process_evaluator_config(evaluator_config: Dict[str, Dict[str, str]]):
     return processed_config
 
 
-def _rename_columns_conditionally(df: pd.DataFrame):
+def _rename_columns_conditionally(df: pd.DataFrame) -> pd.DataFrame:
     """
     Change the column names for data frame. The change happens inplace.
 
     The columns with _OUTPUTS prefix will not be changed. _OUTPUTS prefix will
     will be added to columns in target_generated set. The rest columns will get
     ".inputs" prefix.
+
     :param df: The data frame to apply changes to.
+    :type df: pandas.DataFrame
     :return: The changed data frame.
+    :rtype: pandas.DataFrame
     """
     rename_dict = {}
     for col in df.columns:
         # Rename columns generated by target.
-        if Prefixes._TGT_OUTPUTS in col:
-            rename_dict[col] = col.replace(Prefixes._TGT_OUTPUTS, Prefixes._OUTPUTS)
+        if Prefixes.TSG_OUTPUTS in col:
+            rename_dict[col] = col.replace(Prefixes.TSG_OUTPUTS, Prefixes.OUTPUTS)
         else:
             rename_dict[col] = f"inputs.{col}"
     df.rename(columns=rename_dict, inplace=True)
@@ -360,12 +456,12 @@ def evaluate(
                 "    if __name__ == '__main__':\n"
                 "        evaluate(...)"
             )
-            raise RuntimeError(error_message)
+            raise RuntimeError(error_message) from e
 
         raise e
 
 
-def _evaluate(
+def _evaluate(  # pylint: disable=too-many-locals
     *,
     evaluation_name: Optional[str] = None,
     target: Optional[Callable] = None,
@@ -376,7 +472,6 @@ def _evaluate(
     output_path: Optional[str] = None,
     **kwargs,
 ):
-
     input_data_df = _validate_and_load_data(target, data, evaluators, output_path, azure_ai_project, evaluation_name)
 
     # Process evaluator config to replace ${target.} with ${data.}
@@ -387,8 +482,9 @@ def _evaluate(
 
     # Target Run
     pf_client = PFClient(
-        config={
-            "trace.destination": _trace_destination_from_project_scope(azure_ai_project)} if azure_ai_project else None,
+        config={"trace.destination": _trace_destination_from_project_scope(azure_ai_project)}
+        if azure_ai_project
+        else None,
         user_agent=USER_AGENT,
     )
 
@@ -418,7 +514,7 @@ def _evaluate(
                 # We will add our mapping only if
                 # customer did not mapped target output.
                 if col not in mapping and run_output not in mapped_to_values:
-                    evaluator_config[evaluator_name][col] = run_output
+                    evaluator_config[evaluator_name][col] = run_output  # pylint: disable=unnecessary-dict-index-lookup
 
         # After we have generated all columns we can check if we have
         # everything we need for evaluators.
@@ -427,7 +523,15 @@ def _evaluate(
     # Batch Run
     evaluators_info = {}
     use_pf_client = kwargs.get("_use_pf_client", True)
-    batch_run_client = ProxyClient(pf_client) if use_pf_client else CodeClient()
+    if use_pf_client:
+        batch_run_client = ProxyClient(pf_client)
+
+        # Ensure the absolute path is passed to pf.run, as relative path doesn't work with
+        # multiple evaluators. If the path is already absolute, abspath will return the original path.
+        data = os.path.abspath(data)
+    else:
+        batch_run_client = CodeClient()
+        data = input_data_df
 
     with BatchRunContext(batch_run_client):
         for evaluator_name, evaluator in evaluators.items():
@@ -437,7 +541,7 @@ def _evaluate(
                 run=target_run,
                 evaluator_name=evaluator_name,
                 column_mapping=evaluator_config.get(evaluator_name, evaluator_config.get("default", None)),
-                data=input_data_df if isinstance(batch_run_client, CodeClient) else data,
+                data=data,
                 stream=True,
                 name=kwargs.get("_run_name"),
             )
@@ -455,14 +559,14 @@ def _evaluate(
 
         # drop input columns
         evaluator_result_df = evaluator_result_df.drop(
-            columns=[col for col in evaluator_result_df.columns if str(col).startswith(Prefixes._INPUTS)]
+            columns=[col for col in evaluator_result_df.columns if str(col).startswith(Prefixes.INPUTS)]
         )
 
         # rename output columns
         # Assuming after removing inputs columns, all columns are output columns
         evaluator_result_df.rename(
             columns={
-                col: f"outputs.{evaluator_name}.{str(col).replace(Prefixes._OUTPUTS, '')}"
+                col: f"outputs.{evaluator_name}.{str(col).replace(Prefixes.OUTPUTS, '')}"
                 for col in evaluator_result_df.columns
             },
             inplace=True,
@@ -486,7 +590,11 @@ def _evaluate(
     metrics.update(evaluators_metric)
 
     studio_url = _log_metrics_and_instance_results(
-        metrics, result_df, trace_destination, target_run, evaluation_name,
+        metrics,
+        result_df,
+        trace_destination,
+        target_run,
+        evaluation_name,
     )
 
     result = {"rows": result_df.to_dict("records"), "metrics": metrics, "studio_url": studio_url}
