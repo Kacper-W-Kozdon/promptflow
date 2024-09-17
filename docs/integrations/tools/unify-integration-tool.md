@@ -4,6 +4,7 @@
 This tool package provides access to [numerous endpoints](https://console.unify.ai/dashboard) and custom routers, with the option to employ dynamic routing to obtain responses from the best-suited model@provider for your task.
 
 ## Requirements
+PyPI package: [`unify-integration`](https://pypi.org/project/unify-integration/).
 - For local users:
     ```
     pip install unify-integration
