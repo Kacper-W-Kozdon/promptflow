@@ -17,6 +17,6 @@ PyPI package: [`unify-integration`](https://pypi.org/project/unify-integration/)
 | ---- | ---- | ----------- | -------- |
 | cost | string | Cost-per-token for the endpoint. | No |
 | quality | string | The quality value of the model based on [dataset evaluations](https://console.unify.ai/dashboard) done by the oracle model. | No |
-| inter_token_latancy | string | The delay before a new token is output. | No |
+| inter_token_latency | string | The delay before a new token is output. | No |
 | time_to_first_token | string | The delay before the first token is generated | No |
 | connection | CustomConnection | UnifyConnection using the [Unify client](https://github.com/unifyai/unify?tab=readme-ov-file#chatbot-agent) | No |
