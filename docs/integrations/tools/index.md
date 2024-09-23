@@ -23,4 +23,5 @@ The table below provides an index of custom tool packages. The columns contain:
 
 azure-ai-language-tool
 llmlingua-prompt-compression-tool
+unify-integration
 ```
